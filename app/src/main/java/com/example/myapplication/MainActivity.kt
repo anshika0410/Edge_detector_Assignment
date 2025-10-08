@@ -2,11 +2,13 @@ package com.example.myapplication
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
@@ -20,16 +22,30 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewBinding: ActivityMainBinding
     private lateinit var cameraExecutor: ExecutorService
 
-    // This is the entry point of our app's main screen
+    // State variable to track the current filter
+    private var isCannyFilter = true
+
+    // Updated native function to accept a boolean
+    private external fun processFrame(bitmap: Bitmap, useCanny: Boolean)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
 
-        // Create a background thread to run camera operations on
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        // Request camera permissions
+        // Set up the button click listener
+        viewBinding.filterToggleButton.setOnClickListener {
+            isCannyFilter = !isCannyFilter // Toggle the state
+            // Update the button text
+            viewBinding.filterToggleButton.text = if (isCannyFilter) {
+                "Switch to Grayscale"
+            } else {
+                "Switch to Canny"
+            }
+        }
+
         if (allPermissionsGranted()) {
             startCamera()
         } else {
@@ -38,33 +54,53 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // This function sets up and starts the camera preview
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
         cameraProviderFuture.addListener({
-            // Used to bind the lifecycle of cameras to the lifecycle owner
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
 
-            // Set up the Preview use case
-            val preview = Preview.Builder()
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
+            }
+
+            val imageAnalyzer = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also {
-                    // Link the preview to our PreviewView from the layout
-                    it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
+                    // --- THIS IS THE NEW, CORRECTED CODE ---
+                    it.setAnalyzer(cameraExecutor) { imageProxy ->
+                        // Get the rotation degrees for the current frame
+                        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                        val bitmap = imageProxy.toBitmap()
+                        imageProxy.close()
+
+                        // Create a matrix to apply the rotation
+                        val matrix = android.graphics.Matrix()
+                        matrix.postRotate(rotationDegrees.toFloat())
+
+                        // Create a new bitmap that is correctly rotated
+                        val rotatedBitmap = Bitmap.createBitmap(
+                            bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true
+                        )
+
+                        // Process the ROTATED bitmap in C++
+                        // Process the ROTATED bitmap in C++
+                        processFrame(rotatedBitmap, isCannyFilter)
+
+                        // Display the ROTATED bitmap
+                        runOnUiThread {
+                            viewBinding.imageView.setImageBitmap(rotatedBitmap)
+                        }
+                    }
                 }
 
-            // Select the back camera as a default
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             try {
-                // Unbind everything before rebinding
                 cameraProvider.unbindAll()
-
-                // Bind the camera use cases to the lifecycle
                 cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview)
-
+                    this, cameraSelector, preview, imageAnalyzer)
             } catch(exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
@@ -72,43 +108,35 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    // A helper function to check if we have the required permissions
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
-        ContextCompat.checkSelfPermission(
-            baseContext, it) == PackageManager.PERMISSION_GRANTED
+        ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
     }
 
-    // This function is called after the user responds to the permission request
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
-                // If permissions are granted, start the camera
                 startCamera()
             } else {
-                // If permissions are not granted, show a message and close the app
-                Toast.makeText(this,
-                    "Permissions not granted by the user.",
-                    Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Permissions not granted.", Toast.LENGTH_SHORT).show()
                 finish()
             }
         }
     }
 
-    // Clean up the cameraExecutor when the app is closed
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
     }
 
-    // A companion object to hold our constants
     companion object {
         private const val TAG = "EdgeDetector"
         private const val REQUEST_CODE_PERMISSIONS = 10
-        private val REQUIRED_PERMISSIONS =
-            mutableListOf (
-                Manifest.permission.CAMERA
-            ).toTypedArray()
+        private val REQUIRED_PERMISSIONS = mutableListOf (Manifest.permission.CAMERA).toTypedArray()
+
+        init {
+            System.loadLibrary("myapplication")
+        }
     }
 }

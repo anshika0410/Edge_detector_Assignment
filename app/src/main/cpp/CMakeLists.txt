@@ -13,9 +13,11 @@ add_library(myapplication SHARED native-lib.cpp)
 # Find and link the Android logging and bitmap libraries
 find_library(log-lib log)
 find_library(jnigraphics-lib jnigraphics)
+find_library(GLESv2-lib GLESv2)
 
 target_link_libraries(
         myapplication
         ${log-lib}
         ${jnigraphics-lib}
-        ${OpenCV_LIBS} )
+        ${OpenCV_LIBS}
+        ${GLESv2-lib} )

@@ -61,7 +61,7 @@ This pipeline ensures that heavy processing occurs on a background thread and in
 To build and run this project, follow these steps:
 
 1. **Clone the Repository:**  
-   git clone [\[https://github.com/your-username/Edge\_detector\_Assignment.git\](https://github.com/your-username/Edge\_detector\_Assignment.git)
+   git clone https://github.com/anshika0410/Edge_detector_Assignment
 
 2. **Download OpenCV for Android:**  
    * Download the **OpenCV Android SDK (version 4.9.0 is recommended)** from the official [OpenCV releases page](https://github.com/opencv/opencv/releases).  
